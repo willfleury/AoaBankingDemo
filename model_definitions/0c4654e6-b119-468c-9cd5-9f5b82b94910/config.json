@@ -1,0 +1,6 @@
+{
+  "hyperParameters": {
+      "variance_prop_threshold": 0.5,
+      "cond_ind_threshold": 25
+  }
+}
