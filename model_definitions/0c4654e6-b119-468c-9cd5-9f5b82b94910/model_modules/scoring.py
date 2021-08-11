@@ -1,4 +1,4 @@
-from teradataml import create_context, DataFrame, copy_to_sql, remove_context
+from teradataml import create_context, DataFrame, copy_to_sql, remove_context, INTEGER
 from aoa.stats import stats
 from aoa.util.artefacts import save_plot
 from teradataml.analytics.valib import *
@@ -17,9 +17,10 @@ def score(data_conf, model_conf, **kwargs):
 
     features = DataFrame("bank_features")
 
-    # this should be available via kwargs. Being tracked in 
+    # this should be available via kwargs. 
+    # Being tracked in https://github.com/ThinkBigAnalytics/AoaPythonClient/issues/153
     model_table = "AOA_MODELS_{}".format(kwargs.get("model_version").split("-", 1)[0])
-    model = DataFrame("AOA_MODELS_cli")
+    model = DataFrame(model_table)
     
     score = valib.LogRegPredict(data=features, 
                                 model=model, 
@@ -28,13 +29,22 @@ def score(data_conf, model_conf, **kwargs):
                                 prob_column="Probability")
     
     df = score.result
-    df = df.assign(predicted_churn = df.predicted_churn.cast(type_=INTEGER))
+    df = df.assign(cc_acct_ind=df.cc_acct_ind.cast(type_=INTEGER))
     
-    df.to_sql(table_name = data_conf["result_table"], if_exists = 'replace')
+    df.to_sql(table_name="bank_predictions", if_exists='replace')
    
     print("Finished Scoring")
+    
+    print("Calculating dataset statistics")
+    
+    # the number of rows output from VAL is different to the number of input rows.. nulls?
+    # temporary fix - join back to features and filter features without predictions
+    predictions = DataFrame("bank_predictions")
+    features = DataFrame.from_query("SELECT F.* FROM bank_features F JOIN bank_predictions P ON F.cust_id = P.cust_id")
 
     stats.record_scoring_stats(features, DataFrame("bank_predictions"))
+    
+    print("Finished calculating dataset statistics")
     
     remove_context()
     

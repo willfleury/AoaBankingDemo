@@ -1,15 +1,17 @@
 from sklearn import metrics
-from teradataml import create_context
-from teradataml.dataframe.dataframe import DataFrame
-from teradataml.dataframe.copy_to import copy_to_sql
+from teradataml import create_context, DataFrame, copy_to_sql, remove_context, INTEGER
 from aoa.stats import stats
 from aoa.util.artefacts import save_plot
+from teradataml.analytics.valib import *
+from teradataml import configure
 
 import os
-import joblib
+import matplotlib.pyplot as plt
+import itertools
 import json
-import numpy as np
-import pandas as pd
+
+
+configure.val_install_location = os.environ.get("AOA_VAL_DB", "VAL")
 
 
 def evaluate(data_conf, model_conf, **kwargs):
@@ -18,17 +20,23 @@ def evaluate(data_conf, model_conf, **kwargs):
                    password=os.environ["AOA_CONN_PASSWORD"],
                    database=data_conf["schema"] if "schema" in data_conf and data_conf["schema"] != "" else None)
 
-    features = DataFrame("bank_features")
-
-    print("Starting training...")
+    ads = DataFrame("bank_features")
+    model = DataFrame(kwargs.get("model_table"))
     
-    # todo should have version in table name.
-    model = DataFrame("bank_cc_model")
+    score = valib.LogRegPredict(data=ads, 
+                                model=model, 
+                                index_columns="cust_id",
+                                estimate_column="pred_cc_acct_ind",
+                                prob_column="Probability",
+                                accumulate="cc_acct_ind")
     
-    model_eval = valib.LogRegEvaluator(data=features, 
-                                       model=model, 
-                                       index_columns="cust_id",
-                                       prob_column="Probability")
+    results = score.result
+    results = results.assign(pred_cc_acct_ind=results.pred_cc_acct_ind.cast(type_=INTEGER))
+    
+    predictions = results.select(["cc_acct_ind", "pred_cc_acct_ind"]).to_pandas()
+    
+    y_pred = predictions[["pred_cc_acct_ind"]]
+    y_test = predictions[["cc_acct_ind"]]
     
     evaluation = {
         'Accuracy': '{:.2f}'.format(metrics.accuracy_score(y_test, y_pred)),
@@ -37,17 +45,42 @@ def evaluate(data_conf, model_conf, **kwargs):
         'f1-score': '{:.2f}'.format(metrics.f1_score(y_test, y_pred))
     }
 
+    # saving metrics to output dir
+    
     with open("artifacts/output/metrics.json", "w+") as f:
         json.dump(evaluation, f)
 
-    metrics.plot_confusion_matrix(model, X_test, y_test)
-    save_plot('Confusion Matrix')
+    # create confusion matrix plot
+    cf = metrics.confusion_matrix(y_test, y_pred)
 
-    metrics.plot_roc_curve(model, X_test, y_test)
-    save_plot('ROC Curve')
+    plt.imshow(cf,cmap=plt.cm.Blues,interpolation='nearest')
+    plt.colorbar()
+    plt.title('Confusion Matrix')
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.xticks([0, 1], ['0','1'])
+    plt.yticks([0, 1], ['0','1'])
+
+    thresh = cf.max() / 2.
+    for i,j in itertools.product(range(cf.shape[0]),range(cf.shape[1])):
+        plt.text(j,i,format(cf[i,j],'d'),horizontalalignment='center',color='white' if cf[i,j] >thresh else 'black')
+
+    fig = plt.gcf()
+    fig.savefig('artifacts/output/confusion_matrix', dpi=500)
+    plt.clf()
+
+    print("Evaluation complete...")
+
+    print("Calculating dataset statistics")
 
 
-    predictions_table = "{}_tmp".format(data_conf["predictions"]).lower()
-    copy_to_sql(df=y_pred_tdf, table_name=predictions_table, index=False, if_exists="replace", temporary=True)
+    # the number of rows output from VAL is different to the number of input rows.. nulls?
+    # temporary workaround - join back to features and filter features without predictions
+    results.to_sql(table_name="bank_predictions_tmp", if_exists='replace', temporary=True)
+    ads = DataFrame.from_query("SELECT F.* FROM bank_features F JOIN bank_predictions_tmp P ON F.cust_id = P.cust_id")
 
-    stats.record_evaluation_stats(test_df, DataFrame(predictions_table), feature_importance)
+    stats.record_evaluation_stats(ads, results)
+    
+    print("Finished calculating dataset statistics")
+    
+    remove_context()
