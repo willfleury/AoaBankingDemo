@@ -19,3 +19,4 @@ metastore_db/
 .vscode/
 
 models/
+.aoa/

@@ -20,7 +20,9 @@ def evaluate(data_conf, model_conf, **kwargs):
                    password=os.environ["AOA_CONN_PASSWORD"],
                    database=data_conf["schema"] if "schema" in data_conf and data_conf["schema"] != "" else None)
 
-    ads = DataFrame("bank_features")
+    features_table = data_conf["features"]
+    
+    ads = DataFrame(features_table)
     model = DataFrame(kwargs.get("model_table"))
     
     score = valib.LogRegPredict(data=ads, 
@@ -44,8 +46,6 @@ def evaluate(data_conf, model_conf, **kwargs):
         'Precision': '{:.2f}'.format(metrics.precision_score(y_test, y_pred)),
         'f1-score': '{:.2f}'.format(metrics.f1_score(y_test, y_pred))
     }
-
-    # saving metrics to output dir
     
     with open("artifacts/output/metrics.json", "w+") as f:
         json.dump(evaluation, f)
@@ -72,13 +72,13 @@ def evaluate(data_conf, model_conf, **kwargs):
     print("Evaluation complete...")
 
     print("Calculating dataset statistics")
-
-
+    
+    
     # the number of rows output from VAL is different to the number of input rows.. nulls?
     # temporary workaround - join back to features and filter features without predictions
     results.to_sql(table_name="bank_predictions_tmp", if_exists='replace', temporary=True)
-    ads = DataFrame.from_query("SELECT F.* FROM bank_features F JOIN bank_predictions_tmp P ON F.cust_id = P.cust_id")
-
+    ads = DataFrame.from_query(f"SELECT F.* FROM {features_table} F JOIN bank_predictions_tmp P ON F.cust_id = P.cust_id")
+    
     stats.record_evaluation_stats(ads, results)
     
     print("Finished calculating dataset statistics")

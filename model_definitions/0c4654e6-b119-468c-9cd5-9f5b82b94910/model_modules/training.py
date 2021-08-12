@@ -17,7 +17,9 @@ def train(data_conf, model_conf, **kwargs):
                    password=os.environ["AOA_CONN_PASSWORD"],
                    database=data_conf["schema"] if "schema" in data_conf and data_conf["schema"] != "" else None)
 
-    ads = DataFrame("bank_features")
+    features_table = data_conf["features"]
+    
+    ads = DataFrame(features_table)
 
     print("Starting training...")
     
@@ -25,7 +27,7 @@ def train(data_conf, model_conf, **kwargs):
     feature_names = ['income_bins', 'age_bins', 'tot_cust_years', 
                 'tot_children', 'female_ind', 'single_ind', 'married_ind','separated_ind',
                 'ca_resident_ind', 'ny_resident_ind', 'tx_resident_ind', 'il_resident_ind', 
-                'az_resident_ind', 'oh_resident_ind', 'ck_acct_ind','sv_acct_ind',
+                'az_resident_ind', 'oh_resident_ind','sv_acct_ind',
                 'ck_avg_bal','sv_avg_bal','ck_avg_tran_amt','cc_avg_tran_amt',
                 'q1_trans_cnt','q2_trans_cnt','q3_trans_cnt','q4_trans_cnt']
     target_name = "cc_acct_ind"
