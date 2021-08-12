@@ -52,7 +52,10 @@ def train(data_conf, model_conf, **kwargs):
     stats.record_training_stats(ads,
                        features=feature_names,
                        predictors=[target_name],
-                       categorical=[target_name],
+                        # bug in VAL frequency won't allow us to specify more categorical columns
+                        # tracked in https://github.com/ThinkBigAnalytics/AoaPythonClient/issues/155
+                       categorical=[target_name, 'female_ind', 'single_ind', 'married_ind',
+                                    'separated_ind','ca_resident_ind', 'ny_resident_ind', 'tx_resident_ind'],
                        category_labels={target_name: {0: "false", 1: "true"}})
     
     print("Finished calculating dataset statistics")
