@@ -39,14 +39,16 @@ def evaluate(data_conf, model_conf, **kwargs):
                    (model_version, model_id, model_bytes))
 
     scores_df = pd.read_sql(f"""
-    SELECT cust_id, cc_acct_ind as y_test, CAST(CAST(score_result AS JSON).JSONExtractValue('$.predicted_cc_acct_ind') AS INT) as y_pred FROM IVSM.IVSM_SCORE(
-                ON (SELECT * FROM {data_conf["table"]}) AS DataTable
-                ON (SELECT model_id, model FROM ivsm_models_tmp WHERE model_version = '{model_version}') AS ModelTable DIMENSION
-                USING
-                    ModelID('{model_id}')
-                    ColumnsToPreserve('PatientId', 'HasDiabetes')
-                    ModelType('PMML')
-            ) sc;
+    SELECT cust_id, y_test, CAST(y_pred AS INT) FROM (
+        SELECT cust_id, cc_acct_ind as y_test, CAST(score_result AS JSON).JSONExtractValue('$.predicted_cc_acct_ind') as y_pred FROM IVSM.IVSM_SCORE(
+                    ON (SELECT * FROM {data_conf["features"]}) AS DataTable
+                    ON (SELECT model_id, model FROM ivsm_models_tmp WHERE model_version = '{model_version}') AS ModelTable DIMENSION
+                    USING
+                        ModelID('{model_id}')
+                        ColumnsToPreserve('cust_id', 'cc_acct_ind')
+                        ModelType('PMML')
+                ) sc
+        ) T WHERE T.y_pred=0 OR T.y_pred=1;
     """, conn)
 
     y_pred = scores_df[["y_pred"]]
@@ -81,8 +83,12 @@ def evaluate(data_conf, model_conf, **kwargs):
     fig.savefig('artifacts/output/confusion_matrix', dpi=500)
     plt.clf()
 
-    predictions_table = "{}_tmp".format(data_conf["predictions"]).lower()
-    predictions_df = scores_df[["y_pred"]].rename({'y_pred': 'cc_acct_ind'}, axis=1)
+    predictions_table = "bank_predictions_tmp"
+    predictions_df = scores_df[["cust_id", "y_pred"]].rename({'y_pred': 'cc_acct_ind'}, axis=1)
     copy_to_sql(df=predictions_df, table_name=predictions_table, index=False, if_exists="replace", temporary=True)
 
-    stats.record_evaluation_stats(DataFrame(data_conf["table"]), DataFrame(predictions_table))
+    # the number of rows output from VAL is different to the number of input rows.. nulls?
+    # temporary workaround - join back to features and filter features without predictions
+    ads = DataFrame.from_query(f"SELECT F.* FROM {data_conf['features']} F JOIN bank_predictions_tmp P ON F.cust_id = P.cust_id")
+
+    stats.record_evaluation_stats(ads, DataFrame(predictions_table))
